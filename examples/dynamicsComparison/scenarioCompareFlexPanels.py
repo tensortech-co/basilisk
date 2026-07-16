@@ -69,6 +69,8 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 
+import _comparePlots
+
 from Basilisk.utilities import SimulationBaseClass
 from Basilisk.utilities import macros
 from Basilisk.utilities import unitTestSupport
@@ -483,6 +485,7 @@ def run(showPlots=False, saveJson=False, nSegmentsList=(1, 2, 4, 8, 16, 32)):
 
     figureList = plotResults(rows)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -502,7 +505,7 @@ def plotResults(rows):
     dof = np.array([row["dof"] for row in rows])
     figureList = {}
 
-    figureList[fileName+"_validity"], ax = plt.subplots()
+    figureList[fileName+"_validity"], ax = plt.subplots(layout="constrained")
     if "attitudeErrorMax" in rows[0]:
         nHingedErr = np.array([row["attitudeErrorMax"] for row in rows])
         ndofErr = np.array([row["ndofAttitudeErrorMax"] for row in rows])
@@ -512,12 +515,12 @@ def plotResults(rows):
                     label="spinningBodyNDOF vs MuJoCo")
         ax.legend(loc="best")
     ax.set_xlabel("System degrees of freedom")
-    ax.set_ylabel("Max cross-engine attitude error [rad]")
+    ax.set_ylabel("Max cross-engine\nattitude error [rad]")
 
     # Draw the older nHinged effector as a thick translucent underlay, the newer NDOF
     # effector and MuJoCo as thin lines on top, with distinct markers, so all three stay
     # distinguishable even where curves coincide.
-    figureList[fileName+"_runtime"], ax = plt.subplots()
+    figureList[fileName+"_runtime"], ax = plt.subplots(layout="constrained")
     ax.loglog(dof, [row["bsmWall"] for row in rows], "o-", lw=4, alpha=0.4, ms=8,
               color=COLOR_BSM, label="BSM — nHingedRigidBody")
     ax.loglog(dof, [row["ndofWall"] for row in rows], "^-", lw=2, ms=6,
@@ -526,7 +529,7 @@ def plotResults(rows):
         ax.loglog(dof, [row["mujocoWall"] for row in rows], "s-", lw=1.3, ms=5,
                   color=COLOR_MUJOCO, label="MuJoCo")
     ax.set_xlabel("System degrees of freedom")
-    ax.set_ylabel("Wall-clock for fixed step budget [s]")
+    ax.set_ylabel("Wall-clock for\nfixed step budget [s]")
     ax.legend(loc="best")
 
     return figureList

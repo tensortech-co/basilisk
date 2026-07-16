@@ -103,6 +103,8 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 
+import _comparePlots
+
 from Basilisk.utilities import SimulationBaseClass
 from Basilisk.utilities import macros
 from Basilisk.utilities import simIncludeRW
@@ -583,6 +585,7 @@ def run(showPlots=False, saveJson=False, sweepConfigs=None, reference=None,
     figureList = plotResults(bsmRows, mujocoRows, referenceFloor,
                              positionReferenceFloor)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -603,7 +606,7 @@ def _paretoScatter(bsmRows, mujocoRows, errorKey, ylabel):
         matplotlib.figure.Figure: the scatter figure.
     """
     # Legend outside the axes so it does not overlap the data.
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(8, 4), layout="constrained")
     seenLabels = set()
     for rows, engineLabel, facecolor in (
             (bsmRows, "BSM", True), (mujocoRows, "mujoco", False)):
@@ -624,7 +627,6 @@ def _paretoScatter(bsmRows, mujocoRows, errorKey, ylabel):
     ax.set_ylabel(ylabel)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize=7, ncol=1, loc="center left", bbox_to_anchor=(1.02, 0.5))
-    fig.tight_layout()
     return fig
 
 
@@ -640,7 +642,7 @@ def _paretoFrontierPlot(bsmRows, mujocoRows, errorKey, ylabel):
     Returns:
         matplotlib.figure.Figure: the frontier figure.
     """
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(8, 4), layout="constrained")
     for rows, engineLabel, color in (
             (bsmRows, "Back-substitution (BSM)", unitTestSupport.getLineColor(0, 3)),
             (mujocoRows, "MuJoCo", unitTestSupport.getLineColor(1, 3))):
@@ -655,7 +657,6 @@ def _paretoFrontierPlot(bsmRows, mujocoRows, errorKey, ylabel):
     ax.set_ylabel(ylabel)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
-    fig.tight_layout()
     return fig
 
 
@@ -673,8 +674,8 @@ def plotResults(bsmRows, mujocoRows, referenceFloor=0.0, positionReferenceFloor=
     Returns:
         dict: mapping from figure name to matplotlib figure.
     """
-    attLabel = "Final attitude error [rad]"
-    posLabel = "Final hub position error [m]"
+    attLabel = "Final attitude\nerror [rad]"
+    posLabel = "Final hub\nposition error [m]"
     return {
         fileName+"_pareto": _paretoScatter(bsmRows, mujocoRows, "error", attLabel),
         fileName+"_frontier": _paretoFrontierPlot(bsmRows, mujocoRows, "error", attLabel),

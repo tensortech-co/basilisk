@@ -131,6 +131,7 @@ from Basilisk.simulation import svIntegrators
 from Basilisk.architecture import messaging
 
 import _runtimeTable
+import _comparePlots
 
 try:
     from Basilisk.simulation import mujoco
@@ -561,6 +562,7 @@ def run(showPlots=False, saveJson=False, saveTiming=False):
 
     figureList = plotResults(regimes, ggRate)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -615,7 +617,7 @@ def plotResults(regimes, ggRate):
 
     # Part A: compact-body orbit accuracy. Each engine tracks Kepler to its RK4 truncation
     # level (~1e-8 m); the cross-engine difference is round-off (~1e-9 m).
-    figureList[fileName+"_compactOrbit"], ax = plt.subplots()
+    figureList[fileName+"_compactOrbit"], ax = plt.subplots(layout="constrained")
     ax.semilogy(compact["time"], np.maximum(compact["bsmVsKepler"], 1e-12),
                 lw=4, alpha=0.4, color=COLOR_BSM, label="BSM vs Kepler")
     if compact["posMujoco"] is not None:
@@ -625,33 +627,33 @@ def plotResults(regimes, ggRate):
         ax.semilogy(compact["time"], np.maximum(compact["crossOrbit"], 1e-12),
                     lw=1.3, ls="--", color=COLOR_REFERENCE, label="BSM vs MuJoCo")
     ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Center-of-mass position error [m]")
+    ax.set_ylabel("Center-of-mass\nposition error [m]")
     ax.legend(loc="best")
 
     # Part B: extended-body attitude divergence -- the gravity-gradient torque the BSM
     # point-mass model omits. Over one orbit it builds up as a tumble-modulated libration,
     # not a clean power law. The gravity-gradient scale 3 mu/r^3 dI/I is annotated as an
     # order-of-magnitude anchor, not fit to the curve.
-    figureList[fileName+"_attError"], ax = plt.subplots()
+    figureList[fileName+"_attError"], ax = plt.subplots(layout="constrained")
     if extended["attError"] is not None:
         ax.plot(extended["time"], extended["attError"]*macros.R2D,
                 color=COLOR_MUJOCO, label="BSM vs MuJoCo hub attitude")
         ax.set_title(r"gravity-gradient scale $3\mu r^{-3}\Delta I/\bar I \approx$ "
                      f"{ggRate:.0e} " + r"rad/s$^2$", fontsize=9)
     ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Hub principal angle of relative DCM [deg]")
+    ax.set_ylabel("Hub principal angle\nof relative DCM [deg]")
     ax.legend(loc="best")
 
     # The two regimes side by side: cross-engine orbit agreement degrades from
     # floating-point round-off (compact) to the gravity-gradient floor (extended).
-    figureList[fileName+"_regimes"], ax = plt.subplots()
+    figureList[fileName+"_regimes"], ax = plt.subplots(layout="constrained")
     if compact["posMujoco"] is not None:
         ax.semilogy(compact["time"], np.maximum(compact["crossOrbit"], 1e-12),
                     color=COLOR_BSM, label="Compact (hub + wheels)")
         ax.semilogy(extended["time"], np.maximum(extended["crossOrbit"], 1e-12),
                     color=COLOR_MUJOCO, label="Extended (+ offset panels)")
     ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Cross-engine center-of-mass difference [m]")
+    ax.set_ylabel("Cross-engine\ncenter-of-mass difference [m]")
     ax.legend(loc="best")
 
     return figureList

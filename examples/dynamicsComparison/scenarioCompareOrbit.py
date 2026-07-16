@@ -109,6 +109,7 @@ from Basilisk.simulation import spacecraft
 from Basilisk.simulation import svIntegrators
 
 import _runtimeTable
+import _comparePlots
 
 try:
     from Basilisk.simulation import mujoco
@@ -352,6 +353,7 @@ def run(showPlots=False, saveJson=False, saveTiming=False):
     figureList = plotResults(timeAxis, truth, posBSM, posMujoco,
                              errBSM, errMujoco, crossError)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -420,7 +422,7 @@ def plotResults(timeAxis, truth, posBSM, posMujoco,
     # The analytic, BSM, and MuJoCo trajectories lie on top of one another, so the
     # BSM curve is drawn as a thick translucent underlay and MuJoCo as a thin line on
     # top: the halo stays visible even where the two engines overlap exactly.
-    figureList[fileName+"_trajectory"], ax = plt.subplots()
+    figureList[fileName+"_trajectory"], ax = plt.subplots(layout="constrained")
     ax.plot(truth[:, 0]/1e3, truth[:, 1]/1e3, "-", lw=1.5,
             color=COLOR_REFERENCE, label="Analytic Kepler")
     ax.plot(posBSM[:, 0]/1e3, posBSM[:, 1]/1e3, "-", lw=4, alpha=0.4,
@@ -433,7 +435,7 @@ def plotResults(timeAxis, truth, posBSM, posMujoco,
     ax.axis("equal")
     ax.legend(loc="best")
 
-    figureList[fileName+"_accuracy"], ax = plt.subplots()
+    figureList[fileName+"_accuracy"], ax = plt.subplots(layout="constrained")
     ax.semilogy(timeHours, np.maximum(errBSM, 1e-12), lw=4, alpha=0.4,
                 color=COLOR_BSM, label="BSM vs Kepler")
     if errMujoco is not None:
@@ -443,7 +445,7 @@ def plotResults(timeAxis, truth, posBSM, posMujoco,
     ax.set_ylabel("Position error [m]")
     ax.legend(loc="best")
 
-    figureList[fileName+"_crossError"], ax = plt.subplots()
+    figureList[fileName+"_crossError"], ax = plt.subplots(layout="constrained")
     if crossError is not None:
         ax.semilogy(timeHours, np.maximum(crossError, 1e-15), color=COLOR_MUJOCO)
     ax.set_xlabel("Time [hr]")

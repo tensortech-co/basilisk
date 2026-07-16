@@ -103,6 +103,7 @@ from Basilisk.simulation import svIntegrators
 from Basilisk.architecture import messaging
 
 import _runtimeTable
+import _comparePlots
 
 try:
     from Basilisk.simulation import mujoco
@@ -408,6 +409,7 @@ def run(showPlots=False, saveJson=False, saveTiming=False):
     figureList = plotResults(timeAxis, omegaBSM, omegaMujoco,
                              panelBSM, panelMujoco, attError)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -461,39 +463,38 @@ def plotResults(timeAxis, omegaBSM, omegaMujoco,
     """
     figureList = {}
 
-    # Color encodes the vector component; the two engines share it. BSM is a thick
-    # translucent underlay, MuJoCo a thin opaque line on top, so both stay visible
-    # under perfect overlap.
-    figureList[fileName+"_rate"], ax = plt.subplots()
-    for i in range(3):
-        color = unitTestSupport.getLineColor(i, 3)
-        ax.plot(timeAxis, omegaBSM[:, i], "-", lw=4, alpha=0.4, color=color,
-                label=r"BSM $\omega_" + "xyz"[i] + "$")
-        if omegaMujoco is not None:
-            ax.plot(timeAxis, omegaMujoco[:, i], "-", lw=1.3, color=color,
-                    label=r"MuJoCo $\omega_" + "xyz"[i] + "$")
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel(r"$\omega_{BN}$ [rad/s]")
-    ax.legend(ncol=3, fontsize=8, loc="best")
+    # Hub body rate: 2x3 x/y/z overlay-and-difference grid, both engines for the same
+    # physical quantity.
+    name, fig = _comparePlots.componentComparison(
+        fileName+"_rate", timeAxis, omegaBSM, omegaMujoco,
+        quantity=r"$\omega_{BN}$", unit="rad/s")
+    figureList[name] = fig
 
-    figureList[fileName+"_panels"], ax = plt.subplots()
-    panelLabels = ("+x array", "-x array")
-    for i in range(panelBSM.shape[1]):
-        color = unitTestSupport.getLineColor(i, panelBSM.shape[1])
-        ax.plot(timeAxis, panelBSM[:, i]*macros.R2D, "-", lw=4, alpha=0.4, color=color,
-                label="BSM " + panelLabels[i])
+    # Two panel hinge angles: matched overlay of a 2-vector, so a 2x2 grid built here.
+    fig, axes = plt.subplots(2, 2, sharex=True, figsize=(7.5, 4.4), layout="constrained")
+    panelTitles = ("Panel +x", "Panel -x")
+    for col in range(panelBSM.shape[1]):
+        axTop, axBot = axes[0, col], axes[1, col]
+        axTop.plot(timeAxis, panelBSM[:, col]*macros.R2D, lw=4, alpha=0.4,
+                   color=_comparePlots.COLOR_BSM, label="BSM")
         if panelMujoco is not None:
-            ax.plot(timeAxis, panelMujoco[:, i]*macros.R2D, "-", lw=1.3, color=color,
-                    label="MuJoCo " + panelLabels[i])
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Panel hinge angle [deg]")
-    ax.legend(fontsize=8, loc="best")
+            axTop.plot(timeAxis, panelMujoco[:, col]*macros.R2D, lw=1.3,
+                       color=_comparePlots.COLOR_MUJOCO, label="MuJoCo")
+            axBot.plot(timeAxis, (panelBSM[:, col]-panelMujoco[:, col])*macros.R2D,
+                       color=_comparePlots.COLOR_DIFF)
+        axTop.set_title(panelTitles[col])
+        axBot.set_xlabel("Time [s]")
+    axes[0, 0].set_ylabel("Hinge angle [deg]")
+    axes[1, 0].set_ylabel("Difference [deg]")
+    if panelMujoco is not None:
+        axes[0, 0].legend(loc="best", fontsize=8)
+    figureList[fileName+"_panels"] = fig
 
-    figureList[fileName+"_attError"], ax = plt.subplots()
+    figureList[fileName+"_attError"], ax = plt.subplots(layout="constrained")
     if attError is not None:
         ax.semilogy(timeAxis, np.maximum(attError, 1e-16), color=COLOR_MUJOCO)
     ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Hub principal angle of relative DCM [rad]")
+    ax.set_ylabel("Hub principal angle\nof relative DCM [rad]")
 
     return figureList
 

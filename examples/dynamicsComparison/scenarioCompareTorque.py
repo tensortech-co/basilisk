@@ -50,6 +50,14 @@ rather than truncation: the identically-zero self-term
 rounded :math:`\mathcal{O}(m|{\bf v}_{\rm lin}|^2)` products driven by the orbital velocity.
 It is negligible here but reported to keep the distinction explicit.
 
+.. note::
+
+    The :math:`\sim 10^{-6}` rad figure is the floor of the stock MuJoCo binary this build links.
+    The round-off is removable at its source -- forming the genuine gyroscopic coupling directly in
+    ``mj_rne``/``mj_rnePostConstraint`` rather than as a difference of rounded products drops it to
+    :math:`\sim 10^{-13}` rad -- but that needs a patched MuJoCo build, so the figures above are the
+    as-shipped floor.
+
 Attitudes are compared by the **principal rotation angle of the relative direction cosine
 matrix**, :math:`4\,\arctan(|\pmb\sigma_{\rm rel}|)`, rather than by differencing attitude
 parameters: BSM integrates a Modified Rodrigues Parameter set (``sigma_BN``) while MuJoCo
@@ -137,6 +145,7 @@ from Basilisk.simulation import svIntegrators
 from Basilisk.architecture import messaging
 
 import _runtimeTable
+import _comparePlots
 
 try:
     from Basilisk.simulation import mujoco
@@ -477,6 +486,7 @@ def run(showPlots=False, saveJson=False, saveTiming=False):
                              momentumBSM, momentumMujoco, momentumTruth,
                              bsmMotionAtt, mujocoMotionAtt)
 
+    _comparePlots.finalizeFigures(figureList)
     if showPlots:
         plt.show()
     plt.close("all")
@@ -556,37 +566,31 @@ def plotResults(timeAxis, omegaBSM, omegaMujoco, attError, attErrorRest,
     timeMin = timeAxis/60.0  # [min]
     figureList = {}
 
-    # Color encodes the vector component; the two engines share it. BSM is a thick
-    # translucent underlay, MuJoCo a thin opaque line on top, so both stay visible.
-    figureList[fileName+"_rate"], ax = plt.subplots()
-    for i in range(3):
-        color = unitTestSupport.getLineColor(i, 3)
-        ax.plot(timeMin, omegaBSM[:, i], "-", lw=4, alpha=0.4, color=color,
-                label=r"BSM $\omega_" + "xyz"[i] + "$")
-        if omegaMujoco is not None:
-            ax.plot(timeMin, omegaMujoco[:, i], "-", lw=1.3, color=color,
-                    label=r"MuJoCo $\omega_" + "xyz"[i] + "$")
-    ax.set_xlabel("Time [min]")
-    ax.set_ylabel(r"$\omega_{BN}$ [rad/s]")
-    ax.legend(ncol=3, fontsize=8, loc="best")
+    # Body-rate history: matched BSM-vs-MuJoCo overlay of the same three-component vector, so
+    # use the shared 2x3 component comparison (columns x/y/z, difference on the bottom row).
+    name, fig = _comparePlots.componentComparison(
+        fileName+"_rate", timeMin, omegaBSM, omegaMujoco,
+        r"$\omega_{BN}$", "rad/s", xlabel="Time [min]")
+    figureList[name] = fig
 
     # Attitude change of each engine between the orbiting body and the same body at rest.
     # The exact answer is zero; BSM sits at machine precision, MuJoCo at its velocity-driven
-    # gyroscopic-bias round-off floor.
-    figureList[fileName+"_motionAttError"], ax = plt.subplots()
+    # gyroscopic-bias round-off floor. This is a per-engine error curve, not a matched overlay.
+    figureList[fileName+"_motionAttError"], ax = plt.subplots(layout="constrained")
     ax.semilogy(timeMin, np.maximum(bsmMotionAtt, 1e-18), color=COLOR_BSM,
                 label="BSM")
     if mujocoMotionAtt is not None:
         ax.semilogy(timeMin, np.maximum(mujocoMotionAtt, 1e-18), color=COLOR_MUJOCO,
                     label="MuJoCo")
     ax.set_xlabel("Time [min]")
-    ax.set_ylabel("Attitude change, orbiting vs at rest [rad]")
+    ax.set_ylabel("Attitude change,\norbiting vs at rest [rad]")
     ax.legend(loc="best")
 
     # Cross-engine attitude difference, at rest and orbiting. At rest the two formulations
     # agree at the RK4 truncation floor; the orbital velocity raises the difference to
-    # MuJoCo's velocity round-off level.
-    figureList[fileName+"_attError"], ax = plt.subplots()
+    # MuJoCo's velocity round-off level. This is already a cross-engine residual, not a matched
+    # overlay of the same quantity.
+    figureList[fileName+"_attError"], ax = plt.subplots(layout="constrained")
     if attError is not None:
         ax.semilogy(timeMin, np.maximum(attErrorRest, 1e-16), color=COLOR_BSM,
                     label="At rest (no linear velocity)")
@@ -594,22 +598,21 @@ def plotResults(timeAxis, omegaBSM, omegaMujoco, attError, attErrorRest,
                     label="Orbiting (~7.5 km/s)")
         ax.legend(loc="best")
     ax.set_xlabel("Time [min]")
-    ax.set_ylabel("Cross-engine principal angle of relative DCM [rad]")
+    ax.set_ylabel("Cross-engine principal\nangle of relative DCM [rad]")
 
-    # Analytic accumulation, BSM momentum, and MuJoCo momentum overlap: analytic as a thin
-    # reference line, BSM a thick translucent underlay, MuJoCo a thin line on top. Confirms
-    # both engines accumulate the applied body torque per the angular-momentum law.
-    figureList[fileName+"_momentum"], ax = plt.subplots()
-    ax.plot(timeMin, np.linalg.norm(momentumTruth, axis=1), "-", lw=1.5,
-            color=COLOR_REFERENCE, label=r"Analytic ${\bf H}_0+\int{\bf L}_N\,dt$")
-    ax.plot(timeMin, np.linalg.norm(momentumBSM, axis=1), "-", lw=4, alpha=0.4,
-            color=COLOR_BSM, label="Back-substitution (BSM)")
-    if momentumMujoco is not None:
-        ax.plot(timeMin, np.linalg.norm(momentumMujoco, axis=1), "-", lw=1.3,
-                color=COLOR_MUJOCO, label="MuJoCo")
-    ax.set_xlabel("Time [min]")
-    ax.set_ylabel(r"$|{\bf H}_{C/N}|$ [kg m$^2$/s]")
-    ax.legend(loc="best")
+    # Angular-momentum magnitude: matched BSM-vs-MuJoCo overlay of the same scalar, so use the
+    # shared overlay+difference helper, then draw the analytic accumulation on the top axis as a
+    # thin reference line. Confirms both engines accumulate the applied body torque per the law.
+    name, fig = _comparePlots.overlayWithDifference(
+        fileName+"_momentum", timeMin,
+        np.linalg.norm(momentumBSM, axis=1),
+        None if momentumMujoco is None else np.linalg.norm(momentumMujoco, axis=1),
+        r"$|{\bf H}_{C/N}|$ [kg m$^2$/s]", xlabel="Time [min]",
+        bsmLabel="Back-substitution (BSM)")
+    fig.axes[0].plot(timeMin, np.linalg.norm(momentumTruth, axis=1), "-", lw=1.5,
+                     color=COLOR_REFERENCE, label=r"Analytic ${\bf H}_0+\int{\bf L}_N\,dt$")
+    fig.axes[0].legend(loc="best")
+    figureList[name] = fig
 
     return figureList
 
