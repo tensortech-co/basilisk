@@ -58,11 +58,12 @@ internal slosh degrees of freedom on top of the six rigid-body ones.
 .. note::
 
     Both the spring-mass-dampers and the pendulum carry their physical bare-wall damping (ratio
-    0.0026). Basilisk's ``sphericalPendulum`` applies its damping as a torque
-    :math:`-d\,\pmb\omega_{\rm rel}\times{\bf l}` that a native MuJoCo ball-joint ``damping`` cannot
-    reproduce, so the MuJoCo side supplies the identical torque through
-    :class:`PendulumDampingCompensator` (both engines then model the same damped pendulum). A real
-    hydrazine tank would carry baffles or a diaphragm and damp one to two orders of magnitude harder.
+    0.0026). Basilisk's ``sphericalPendulum`` damps the bob with a viscous force applied through the
+    rod moment arm, :math:`{\bf l}\times(-d\,{\bf l}')`; a native MuJoCo ball-joint ``damping`` would
+    additionally damp the vestigial rod-spin axis, so the MuJoCo side supplies the identical torque
+    through :class:`PendulumDampingCompensator` (both engines then model the same damped pendulum). A
+    real hydrazine tank would carry baffles or a diaphragm and damp one to two orders of magnitude
+    harder.
 
 Running it
 ----------
@@ -342,10 +343,10 @@ def sloshParameters():
         "smdK": SMD_MASS*omega1**2,  # [N/m] matched to the physical slosh frequency
         "smdC": 2.0*SLOSH_DAMPING_RATIO*SMD_MASS*omega1,  # [N*s/m]
         # The first-mode pendulum carries its physical bare-wall damping. Basilisk's
-        # sphericalPendulum applies this as a torque -D*l' about the tank center (a cross-product
-        # coupling), which no MuJoCo ball-joint damping value reproduces; the MuJoCo side instead
-        # supplies the identical torque through PendulumDampingCompensator (see that class), so both
-        # engines model the same damped pendulum.
+        # sphericalPendulum applies this as a viscous force at the bob acting through the rod moment
+        # arm, l x (-D l'); the MuJoCo side supplies the identical torque through
+        # PendulumDampingCompensator (see that class), so both engines model the same damped
+        # pendulum.
         "pendD": 2.0*SLOSH_DAMPING_RATIO*pendMass*pendLength*omega1,  # pendulum damping [N*m*s]
         # Under thrust the axial particle settles at rho = -a/omega1^2 (which equals -L1). It is
         # started there, as a settling burn would leave it, rather than ringing down from zero.
@@ -630,8 +631,8 @@ def mujocoModel():
       </body>
       <!-- First-mode lateral slosh: a ball joint at the tank center with the bob hanging aft
            along -z. Its restoring force comes from the THRUST-induced acceleration, not gravity.
-           No native joint damping: the BSM pendulum's damping is a torque -d (omega_rel x l) that
-           no ball-joint damping value matches, so it is supplied instead by
+           No native joint damping: a ball-joint damping value would also damp the vestigial
+           rod-spin axis, so the BSM damping torque l x (-d l') is supplied instead by
            PendulumDampingCompensator (see buildMujoco). -->
       <body name="pendulum" pos="{tx} {ty} {tz}">
         <joint name="pendulum" type="ball"/>
@@ -748,22 +749,25 @@ class VariableInertiaCompensator(sysModel.SysModel):
 class PendulumDampingCompensator(sysModel.SysModel):
     r"""Reproduces the BSM spherical-pendulum damping torque on the MuJoCo ball joint.
 
-    Basilisk's ``sphericalPendulum`` damps the first slosh mode with a torque about the tank center
+    Basilisk's ``sphericalPendulum`` damps the first slosh mode with a viscous force at the bob,
+    applied about the tank center through the rod moment arm:
 
     .. math::
 
-        \pmb\tau_{\rm damp} \;=\; -\,d\;\pmb\omega_{\rm rel}\times{\bf l},
+        \pmb\tau_{\rm damp} \;=\; {\bf l}\times\left(-\,d\;{\bf l}'\right),
+        \qquad {\bf l}' = \pmb\omega_{\rm rel}\times{\bf l},
 
-    where :math:`d` is the pendulum damping coefficient, :math:`\pmb\omega_{\rm rel}` the bob's
-    angular rate relative to the hub, and :math:`{\bf l}` the rod vector (length ``pendulumRadius``
-    along the joint's hang axis). A MuJoCo ball joint's native ``damping`` applies
-    :math:`-b\,\pmb\omega_{\rm rel}`, a *different* form -- diagonal in the joint rate rather than
-    the cross-product coupling above -- so no ``damping`` value reproduces it. This module supplies
-    the exact torque instead, reading the ball joint's relative rate live each sub-step and applying
-    it to the pendulum body through a ``MJTorqueActuator``.
+    where :math:`d` is the pendulum damping coefficient, :math:`{\bf l}` the rod vector (length
+    ``pendulumRadius`` along the joint's hang axis), and :math:`\pmb\omega_{\rm rel}` the bob's
+    angular rate relative to the hub.
 
-    With it, the physical pendulum damping can be modeled on *both* engines (rather than switched off
-    to sidestep the mismatch) while keeping the same cross-engine agreement.
+    A MuJoCo ball joint's native ``damping`` would apply :math:`-b\,\pmb\omega_{\rm rel}` on *every*
+    joint degree of freedom. On the two swing axes that is equivalent to the expression above with
+    :math:`b = d\,|{\bf l}|^2`, but it also damps the third (rod-spin) axis, which the two-degree-of-
+    freedom BSM pendulum does not have and which carries only a vestigial inertia here -- enough to
+    destabilize the solve. This module therefore supplies the torque explicitly, reading the ball
+    joint's relative rate each sub-step and applying it through a ``MJTorqueActuator``, so both
+    engines model the same damped pendulum with the physical damping left switched on.
     """
 
     def __init__(self, scene, dampingCoeff, rodLength):
@@ -792,7 +796,10 @@ class PendulumDampingCompensator(sysModel.SysModel):
             self.qvelState = self.scene.dynManager.getStateObject("mujocoQvel")
         qvel = np.array(self.qvelState.getState()).flatten()
         omegaRel = qvel[self.ballQvelAdr:self.ballQvelAdr + 3]  # [rad/s] bob rate rel hub (body frame)
-        torque_P = -self.dampingCoeff*np.cross(omegaRel, self.rodVector_P)  # [N*m]
+        # Bob velocity relative to the hub, then the damping force at the bob crossed into the rod
+        # moment arm -- the moment-armed form the BSM effector uses.
+        lPrime_P = np.cross(omegaRel, self.rodVector_P)  # [m/s]
+        torque_P = np.cross(self.rodVector_P, -self.dampingCoeff*lPrime_P)  # [N*m]
         payload = messaging.TorqueAtSiteMsgPayload()
         payload.torque_S = list(torque_P)  # pendulum-origin site frame == pendulum body frame
         self.torqueOutMsg.write(payload, CurrentSimNanos, self.moduleID)
