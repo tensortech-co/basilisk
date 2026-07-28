@@ -89,9 +89,9 @@ free-fall and the slosh is restored purely by thrust, as on the BSM side.
 What the comparison shows
 -------------------------
 
-The two engines agree on the depleting masses (to grams), the body rate, and the slosh
-displacements (to microns). They differ in exactly two places, and each is a *modeling* difference,
-not a solver error:
+The two engines agree on the depleting masses (to grams) and track the same body rate and slosh
+displacements (the latter to a fraction of a millimetre). They differ in exactly two places, and
+each is a *modeling* difference, not a solver error:
 
 #. **In orbit -- gravity gradient.** BSM applies gravity once at the system center of mass; MuJoCo
    applies it per body. The tank mounted aft of the hub feels a slightly different field, so the
@@ -111,8 +111,15 @@ torque collapses the cross-engine attitude difference from :math:`\sim 10^{-2}` 
 :math:`\sim 3\times 10^{-6}` rad -- a three-thousand-fold reduction, 99.97% of the effect. The
 remainder is a small higher-order coupling this single torque omits (it is dt-independent, so not
 truncation; a fixed-mass body would agree to :math:`\sim 10^{-13}` rad). In the full slosh-bearing
-scenario the compensator (``compensateVariableInertia``, on by default in deep space) helps less,
-because the pendulum's own BSM-versus-MuJoCo difference sits on top of the rigid-body reaction.
+scenario the compensator (``compensateVariableInertia``, on by default in deep space) leaves a larger
+residual, and that residual is set by the *damped pendulum*: switching the pendulum damping off, or
+leaving the pendulum unexcited, shrinks it (and shrinks the slosh-displacement difference by three to
+ten times), whereas removing the spring-mass-damper damping or excitation changes nothing. The
+pendulum's own degrees of freedom are faithfully matched -- replacing the MuJoCo ball joint with two
+hinges on the back-substitution ``phi``/``theta`` axes reproduces the result to five digits, so the
+ball joint's unused third (rod-spin) degree of freedom is not the cause -- and the rod stays within
+two degrees of vertical, so the residual is a coupling in the damped slosh element itself rather than
+a geometric mismatch.
 
 Illustration of Simulation Results
 ----------------------------------
@@ -764,10 +771,11 @@ class PendulumDampingCompensator(sysModel.SysModel):
     A MuJoCo ball joint's native ``damping`` would apply :math:`-b\,\pmb\omega_{\rm rel}` on *every*
     joint degree of freedom. On the two swing axes that is equivalent to the expression above with
     :math:`b = d\,|{\bf l}|^2`, but it also damps the third (rod-spin) axis, which the two-degree-of-
-    freedom BSM pendulum does not have and which carries only a vestigial inertia here -- enough to
-    destabilize the solve. This module therefore supplies the torque explicitly, reading the ball
-    joint's relative rate each sub-step and applying it through a ``MJTorqueActuator``, so both
-    engines model the same damped pendulum with the physical damping left switched on.
+    freedom BSM pendulum does not have and which carries only a vestigial inertia here -- damping it
+    drives the acceleration solve to NaN. This module therefore supplies the torque explicitly,
+    reading the ball joint's relative rate each sub-step and applying it through a
+    ``MJTorqueActuator``, so both engines model the same damped pendulum with the physical damping
+    left switched on.
     """
 
     def __init__(self, scene, dampingCoeff, rodLength):

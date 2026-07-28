@@ -420,6 +420,13 @@ def finalState(builder, integratorName, dt, tol):
     scSim, recorder, _ = builder(integratorName, dt, tol)
     scSim.ConfigureStopTime(macros.sec2nano(SIM_DURATION))
     scSim.ExecuteSimulation()
+    # The recorder samples at SIM_DURATION, which only fires at the horizon when the step divides it
+    # evenly. For a step that does not, the recorder would hold nothing but the t=0 sample, and
+    # reading [-1] would silently return the *initial* state -- a finite value that passes the
+    # divergence check below and fabricates a large "error". Require the horizon sample to exist.
+    times = np.array(recorder.times())*macros.NANO2SEC  # [s]
+    if len(times) == 0 or times[-1] < SIM_DURATION - 0.5*dt:
+        return None, None
     sigma = np.array(recorder.sigma_BN)[-1]
     r = np.array(recorder.r_BN_N)[-1]  # [m] hub inertial position
     if not (np.all(np.isfinite(sigma)) and np.all(np.isfinite(r))):

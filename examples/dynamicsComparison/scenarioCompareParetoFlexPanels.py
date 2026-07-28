@@ -390,6 +390,14 @@ def finalState(builder, integratorName, dt, tol):
     except Exception:
         # MuJoCo raises on NaN acceleration; treat as divergence.
         return None, None
+    # The recorder samples at SIM_DURATION, which only fires at the horizon when the step divides it
+    # evenly. For a step that does not (e.g. 10 s / 3e-4 s), the recorder would hold nothing but the
+    # t=0 sample, and reading [-1] would silently return the *initial* state -- a finite value that
+    # passes the divergence check below and fabricates a large "error". Require the last sample to
+    # actually be at the horizon instead.
+    times = np.array(recorder.times())*macros.NANO2SEC  # [s]
+    if len(times) == 0 or times[-1] < SIM_DURATION - 0.5*dt:
+        return None, None
     sigma = np.array(recorder.sigma_BN)[-1]
     r = np.array(recorder.r_BN_N)[-1]  # [m] hub inertial position
     if not (np.all(np.isfinite(sigma)) and np.all(np.isfinite(r))):
