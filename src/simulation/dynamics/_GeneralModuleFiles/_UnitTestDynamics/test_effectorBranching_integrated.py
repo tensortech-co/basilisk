@@ -70,6 +70,14 @@ from Basilisk.architecture import messaging
 
 COARSE_TIMESTEP = 0.001  # [s]
 FINE_TIMESTEP = 0.0005  # [s]
+FACET_DRAG_PANEL_AREA = 10.0  # [m^2]
+FACET_DRAG_COEFFICIENT = 5.0  # [-]
+FACET_DRAG_DENSITY = 4.2e-10  # [kg/m^3]
+FACET_DRAG_LOCATION_P = np.array([0.0, 0.0, 0.3])  # [m]
+FACET_DRAG_NORMALS_P = [
+    np.array([0.0, 0.0, 1.0]),
+    np.array([0.0, 0.0, -1.0]),
+]  # [-]
 
 # uncomment this line if this test is to be skipped in the global unit test run, adjust message as needed
 # @pytest.mark.skipif(conditionstring)
@@ -238,6 +246,11 @@ def test_effectorBranchingIntegratedTest(show_plots, stateEffector, isParent, dy
     where again :math:`j` is the segment that the dynamic effector is attached to among all
     :math:`i` segments. The sim 'truth' :math:`{}^{\mathcal{N}}\!\Delta v_{accum,C}` is logged from
     the spacecraft module.
+
+    For the :ref:`facetDragDynamicEffector` cases, the force and torque are also recomputed from
+    the parent segment's inertial attitude and velocity properties. The parent segment frames are
+    intentionally offset from the hub frame, so this comparison detects use of the hub kinematics
+    or an incorrect parent-to-inertial frame transformation.
     """
 
     coarseResidual = effectorBranchingIntegratedTest(show_plots, stateEffector, isParent,
@@ -518,6 +531,9 @@ def effectorBranchingIntegratedTest(show_plots, stateEffector, isParent, dynamic
     unitTestSim.ConfigureStopTime(macros.sec2nano(stopTime))
     unitTestSim.ExecuteSimulation()
 
+    if dynamicEffector == "facetDragDynamicEffector":
+        assertFacetDragUsesParentKinematics(scObject, dynamicEff)
+
     # Continue to check state effector EOMs using pure force & torque
     if dynamicEffector != "extForceTorque":
         return
@@ -699,21 +715,74 @@ def setup_facetDragDynamicEffector():
     facetDrag.ModelTag = "facetDragDynamicEffector"
 
     # facet geometry is expressed in the parent frame, not the hub body frame
-    panelArea = 10.0  # [m^2]
-    panelCd = 5.0  # [-]
-    r_FP_P = np.array([0.0, 0.0, 0.3])  # [m] both faces share the panel centroid
-    for panelNormal_P in [np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -1.0])]:
-        facetDrag.addFacet(panelArea, panelCd, panelNormal_P, r_FP_P)
+    for panelNormal_P in FACET_DRAG_NORMALS_P:
+        facetDrag.addFacet(
+            FACET_DRAG_PANEL_AREA,
+            FACET_DRAG_COEFFICIENT,
+            panelNormal_P,
+            FACET_DRAG_LOCATION_P,
+        )
 
     # the orbit shared by every case here sits above any atmosphere table, so feed the effector a
     # fixed density rather than an atmosphere model or the drag load is zero
     atmoMsgData = messaging.AtmoPropsMsgPayload()
-    atmoMsgData.neutralDensity = 4.2e-10  # [kg/m^3] nominal 200 km density
+    atmoMsgData.neutralDensity = FACET_DRAG_DENSITY
     atmoMsg = messaging.AtmoPropsMsg()
     atmoMsg.write(atmoMsgData)
     facetDrag.atmoDensInMsg.subscribeTo(atmoMsg)
 
     return(facetDrag)
+
+
+def computeFacetDragForceTorque(sigma_PN, v_PN_N):
+    """Compute the expected facet drag load from inertial parent-frame kinematics."""
+    dcm_PN = rbk.MRP2C(sigma_PN)
+    v_PN_P = dcm_PN @ v_PN_N
+    speed = np.linalg.norm(v_PN_P)
+    velocityHat_P = v_PN_P / speed
+
+    expectedForce_P = np.zeros(3)
+    expectedTorque_P = np.zeros(3)
+    for panelNormal_P in FACET_DRAG_NORMALS_P:
+        projectedArea = FACET_DRAG_PANEL_AREA * panelNormal_P.dot(velocityHat_P)
+        if projectedArea > 0.0:
+            facetForce_P = (-0.5 * speed**2 * FACET_DRAG_COEFFICIENT * projectedArea
+                            * FACET_DRAG_DENSITY * velocityHat_P)
+            expectedForce_P += facetForce_P
+            expectedTorque_P += np.cross(FACET_DRAG_LOCATION_P, facetForce_P)
+
+    return expectedForce_P, expectedTorque_P
+
+
+def assertFacetDragUsesParentKinematics(scObject, facetDrag):
+    """Compare the branched facet drag load with an independent parent-frame calculation."""
+    sigma_PN = np.array(scObject.dynManager.getPropertyReference(
+        facetDrag.getPropName_inertialAttitude())).flatten()
+    v_PN_N = np.array(scObject.dynManager.getPropertyReference(
+        facetDrag.getPropName_inertialVelocity())).flatten()
+    expectedForce_P, expectedTorque_P = computeFacetDragForceTorque(sigma_PN, v_PN_N)
+
+    sigma_BN = np.array(scObject.dynManager.getStateObject(
+        scObject.hub.nameOfHubSigma).getState()).flatten()
+    v_BN_N = np.array(scObject.dynManager.getStateObject(
+        scObject.hub.nameOfHubVelocity).getState()).flatten()
+    hubForce_B, _ = computeFacetDragForceTorque(sigma_BN, v_BN_N)
+
+    # Re-evaluate the effector against the same final parent properties used for the truth values.
+    facetDrag.computeForceTorque(0.0, 0.0)  # [s]
+    forceAccuracy = 1e-12  # [N]
+    torqueAccuracy = 1e-12  # [N*m]
+    assert not np.allclose(expectedForce_P, hubForce_B, rtol=0.0, atol=forceAccuracy), (
+        "test setup does not distinguish parent kinematics from hub kinematics")
+    np.testing.assert_allclose(
+        np.array(facetDrag.forceExternal_B).flatten(), expectedForce_P,
+        rtol=0.0, atol=forceAccuracy,
+        err_msg="facet drag force was not computed from the parent kinematics")
+    np.testing.assert_allclose(
+        np.array(facetDrag.torqueExternalPntB_B).flatten(), expectedTorque_P,
+        rtol=0.0, atol=torqueAccuracy,
+        err_msg="facet drag torque was not computed in the parent frame")
+
 
 def setup_constraintEffector(scObject1):
     scObject2 = spacecraft.Spacecraft()
