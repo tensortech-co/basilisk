@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 #include "vizInterface.h"
@@ -497,7 +498,7 @@ void VizInterface::ReadBSKMessages()
  */
 void VizInterface::WriteProtobuffer(uint64_t CurrentSimNanos)
 {
-    vizProtobufferMessage::VizMessage* message = new vizProtobufferMessage::VizMessage;
+    auto message = std::make_unique<vizProtobufferMessage::VizMessage>();
 
     /*! Send the Vizard settings according to interval set by broadcastSettingsSendDelay field */
     this->now = time(0);
@@ -1310,7 +1311,6 @@ void VizInterface::WriteProtobuffer(uint64_t CurrentSimNanos)
         this->outputStream->flush();
     }
 
-    delete message;
     google::protobuf::ShutdownProtobufLibrary();
 
 }
